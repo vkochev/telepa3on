@@ -149,6 +149,47 @@ async def test_business_message_generates_three_suggestions_and_owner_card():
 
 
 @pytest.mark.asyncio
+async def test_business_message_loads_recent_dialog_before_inserting_current_message():
+    class OrderAwareRepo(FakeRepo):
+        def __init__(self):
+            super().__init__()
+            self.recent_dialog = []
+            self.operations = []
+
+        async def get_recent_dialog(self, business_connection_id, chat_id, limit=10):
+            self.operations.append("load_recent_dialog")
+            await super().get_recent_dialog(business_connection_id, chat_id, limit)
+            return list(self.recent_dialog)
+
+        async def create_business_message(self, message, raw_update, owner_chat_id):
+            self.operations.append("insert_current_message")
+            self.recent_dialog.append({
+                "sender_id": 200,
+                "text": message["text"],
+                "telegram_message_id": message["message_id"],
+            })
+            return await super().create_business_message(message, raw_update, owner_chat_id)
+
+    repo = OrderAwareRepo()
+    suggestions = FakeSuggestions()
+    handlers = UpdateHandlers(repo=repo, telegram=FakeTelegram(), suggestions=suggestions, owner_chat_id=999)
+
+    await handlers.handle_update({
+        "business_message": {
+            "message_id": 7,
+            "business_connection_id": "bc_1",
+            "chat": {"id": 100},
+            "from": {"id": 200},
+            "text": "Current message",
+        }
+    })
+
+    assert repo.operations == ["load_recent_dialog", "insert_current_message"]
+    assert suggestions.calls[0][1] == []
+    assert repo.recent_dialog == [{"sender_id": 200, "text": "Current message", "telegram_message_id": 7}]
+
+
+@pytest.mark.asyncio
 async def test_send_callback_replies_with_business_connection_id():
     repo = FakeRepo()
     telegram = FakeTelegram()
@@ -291,8 +332,11 @@ async def test_callback_from_default_owner_is_rejected_for_routed_message():
     assert telegram.callbacks == [("cb_1", "Only the routed owner can approve this reply")]
 
 
-def test_approval_text_includes_exactly_three_options():
+def test_approval_text_marks_options_as_owner_only_drafts():
     text = approval_text("hello", ["a", "b", "c"])
+    assert "Draft suggestions for you only" in text
+    assert "Tap Send 1/2/3 to send one reply to the original chat" in text
+    assert "Reject to send nothing" in text
     assert "1. a" in text
     assert "2. b" in text
     assert "3. c" in text
