@@ -75,7 +75,7 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 
 Telegram will POST updates to `/telegram/webhook`. The app validates the webhook secret header before processing updates.
 
-The current MVP processes `business_connection`, `business_message`, and `callback_query`. The webhook registration also asks Telegram to deliver `edited_business_message` and `deleted_business_messages` so the deployment is ready for those Telegram Chat Automation update types, even though they are not handled yet. Do not include regular `message` in `allowed_updates` unless owner-control message commands are added.
+The current MVP processes `business_connection`, `business_message`, `edited_business_message`, `deleted_business_messages`, and `callback_query`. Edited and deleted Telegram Chat Automation message updates are handled minimally by recording a memory event with the raw update payload; they do not regenerate reply suggestions or change approval routing. Do not include regular `message` in `allowed_updates` unless owner-control message commands are added.
 
 ## Telegram API terminology
 

@@ -264,3 +264,60 @@ def test_suggestion_parser_accepts_json_array_object_or_fence():
 def test_suggestion_parser_requires_exactly_three():
     with pytest.raises(RuntimeError, match="exactly 3"):
         SuggestionClient._parse('["a", "b"]')
+
+
+@pytest.mark.asyncio
+async def test_edited_business_message_records_minimal_memory_only():
+    repo = FakeRepo()
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    update = {
+        "edited_business_message": {
+            "message_id": 9,
+            "business_connection_id": "bc_1",
+            "chat": {"id": 100},
+            "text": "Edited text",
+        }
+    }
+    await handlers.handle_update(update)
+
+    assert repo.messages == []
+    assert repo.suggestions == []
+    assert telegram.messages == []
+    assert repo.memories == [
+        (
+            "bc_1",
+            None,
+            "edited_business_message",
+            {"message_id": 9, "chat_id": 100, "text": "Edited text", "raw_update": update},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deleted_business_messages_records_minimal_memory_only():
+    repo = FakeRepo()
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    update = {
+        "deleted_business_messages": {
+            "business_connection_id": "bc_1",
+            "chat": {"id": 100},
+            "message_ids": [9, 10],
+        }
+    }
+    await handlers.handle_update(update)
+
+    assert repo.messages == []
+    assert repo.suggestions == []
+    assert telegram.messages == []
+    assert repo.memories == [
+        (
+            "bc_1",
+            None,
+            "deleted_business_messages",
+            {"chat_id": 100, "message_ids": [9, 10], "raw_update": update},
+        )
+    ]
