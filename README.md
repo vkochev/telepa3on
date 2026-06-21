@@ -49,13 +49,46 @@ cp .env.example .env
 
 Owner routing normally uses the stored BusinessConnection `user_chat_id`; `OWNER_CHAT_ID` is only the fallback when no stored owner chat exists. `OWNER_CHAT_ROUTES` is intended for local/debug overrides.
 
-## Run locally
+## Local smoke test
 
-```bash
-docker compose up --build
-```
+Use this checklist from a clean checkout to verify that the local stack starts, migrates Postgres, and exposes the operator inspection view.
 
-Services:
+1. Copy the example environment file and edit the local copy:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Fill every required value in `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OWNER_CHAT_ID`, `DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL`. For the Docker Compose stack, keep `DATABASE_URL` pointed at the Compose service name, for example `postgresql://telepa3on:telepa3on@postgres:5432/telepa3on`.
+3. Start the app, Postgres, and Adminer:
+
+   ```bash
+   docker compose up --build
+   ```
+
+4. Check the app health endpoint from another terminal:
+
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+   A healthy local app returns an OK health response.
+5. Open Adminer at <http://localhost:8080> and connect with:
+   - System: `PostgreSQL`
+   - Server: `postgres`
+   - Username: `telepa3on`
+   - Password: `telepa3on`
+   - Database: `telepa3on`
+
+   Adminer runs inside the Compose network, so it should use the Postgres service name `postgres`, not `localhost`. Use `localhost:5432` only from tools running on your host machine outside Compose.
+6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The app container startup command runs `python -m telepa3on.migrate` before starting Uvicorn.
+7. Verify the debug timeline view is queryable in Adminer with:
+
+   ```sql
+   select * from debug_last_events limit 20;
+   ```
+
+Services exposed by the local Compose file:
 
 - App: <http://localhost:8000>
 - Adminer: <http://localhost:8080>
@@ -69,6 +102,89 @@ Apply migrations manually if you are not using the app container startup command
 python -m telepa3on.migrate
 ```
 
+## Single-host Docker Compose deployment
+
+A single-host deployment can use the same app, Postgres, and Adminer services as local development, with a public HTTPS reverse proxy in front of the app. Telegram webhooks require a publicly reachable HTTPS URL; plain HTTP, private LAN hostnames, and untrusted certificates are not suitable for production webhook delivery.
+
+Recommended shape:
+
+- Run `docker compose up --build -d` on the host after creating a production `.env`.
+- Put a reverse proxy such as Caddy, nginx, Traefik, or a managed load balancer on public ports `80` and `443`. Terminate TLS there and forward HTTPS webhook traffic to the app container on Compose port `8000`.
+- Do not expose Postgres (`5432`) or Adminer (`8080`) publicly. If Adminer is enabled on a server, restrict it to a private network, SSH tunnel, VPN, or temporary maintenance window.
+- Keep the app's `DATABASE_URL` compose-internal. Inside Compose it should use the Postgres service DNS name, for example `postgresql://telepa3on:telepa3on@postgres:5432/telepa3on`, not `localhost`.
+- Use a long random `TELEGRAM_WEBHOOK_SECRET`. Telegram sends it in the `X-Telegram-Bot-Api-Secret-Token` header and the app validates it before processing webhook updates. Treat this secret like a password and rotate it if it is exposed.
+
+Register the webhook after DNS and HTTPS are working:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://YOUR_PUBLIC_HOST/telegram/webhook","secret_token":"'"$TELEGRAM_WEBHOOK_SECRET"'","allowed_updates":["business_connection","business_message","edited_business_message","deleted_business_messages","callback_query"]}'
+```
+
+To verify webhook delivery:
+
+1. Confirm the public health endpoint works through the reverse proxy, for example `curl https://YOUR_PUBLIC_HOST/health`.
+2. Call Telegram `getWebhookInfo` and check that the configured URL is correct and that Telegram is not reporting a recent delivery error:
+
+   ```bash
+   curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+   ```
+
+3. Connect the bot to Telegram Chat Automation, send or receive a selected-chat event, and inspect container logs plus `debug_last_events` in Postgres to confirm updates are arriving.
+
+Keep these values secret in production: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OPENAI_API_KEY`, database credentials and backups, `.env`, and any raw webhook payloads or database exports containing personal chat data.
+
+
+## Manual Telegram test
+
+Use this manual end-to-end test to verify the real product loop with Telegram Chat Automation, a public webhook, owner approval, and Postgres inspection. This is a real Telegram test: it requires a bot from BotFather, a Telegram profile that can enable Chat Automation, and either a public HTTPS host or a local app exposed through an HTTPS tunnel.
+
+Before starting, remember the owner-control model:
+
+- Telepa3on sends generated suggestions to the **owner control chat**, not to the original personal chat.
+- Telepa3on never sends a suggestion to the original personal chat until the owner taps `Send 1`, `Send 2`, or `Send 3` on the approval card.
+- Tapping `Reject` marks the suggestion rejected and sends nothing to the original personal chat.
+- The owner control chat is normally determined from Telegram `BusinessConnection.user_chat_id` when that value is available. `OWNER_CHAT_ID` is the fallback when no stored owner chat exists, and `OWNER_CHAT_ROUTES` can override routing for local/debug scenarios by mapping a `business_connection_id` to an owner chat ID.
+- Which personal chats the bot can see is controlled on the Telegram side in Telegram Chat Automation settings. Telepa3on only receives Bot API updates for chats selected there; the app code does not select, grant, or expand Telegram-side chat access.
+
+Checklist:
+
+1. Create a new Telegram bot with BotFather, or use an existing bot dedicated to this test, and put its token in `TELEGRAM_BOT_TOKEN`.
+2. Run Telepa3on locally through a public HTTPS tunnel, or deploy it on a public HTTPS host. Telegram must be able to reach `https://YOUR_PUBLIC_HOST/telegram/webhook`; a plain local `localhost` URL is not enough.
+3. Register the webhook with the existing `setWebhook` command, using the same `TELEGRAM_WEBHOOK_SECRET` configured in `.env`:
+
+   ```bash
+   curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+     -H 'Content-Type: application/json' \
+     -d '{"url":"https://YOUR_PUBLIC_HOST/telegram/webhook","secret_token":"'"$TELEGRAM_WEBHOOK_SECRET"'","allowed_updates":["business_connection","business_message","edited_business_message","deleted_business_messages","callback_query"]}'
+   ```
+
+4. In Telegram, connect the bot to your Telegram profile through Telegram Chat Automation.
+5. In the Telegram Chat Automation UI, select one personal chat/contact for the bot to access. This selection is controlled by Telegram settings, not by Telepa3on code.
+6. Send or receive a new message in that selected personal chat so Telegram emits a Chat Automation `business_message` update to the webhook.
+7. Expect an approval card with exactly three suggested replies in the owner control chat. The suggestions should appear only in this owner control chat at this point.
+8. Click `Send 1`, `Send 2`, or `Send 3` on the approval card.
+9. Verify that the selected reply appears in the original selected personal chat.
+10. Repeat with another incoming selected-chat message, click `Reject`, and verify that no suggestion is sent to the original personal chat.
+11. Open Adminer and inspect `debug_last_events` to confirm the received message, generated suggestions, owner decision, and memory event were recorded:
+
+   ```sql
+   select *
+   from debug_last_events
+   order by created_at desc
+   limit 50;
+   ```
+
+If the approval card does not appear, first check Telegram `getWebhookInfo`, app container logs, `business_connections` rows, and whether the selected personal chat is enabled in Telegram Chat Automation settings. If a reply does not appear in the original personal chat after `Send N`, confirm the bot is still connected to the Telegram profile and that the original chat remains selected for Chat Automation access.
+
+## Persistent Postgres data
+
+The Compose stack stores Postgres data in the named Docker volume `postgres_data`. This volume persists database state across app and database container restarts, including `docker compose restart` and `docker compose down` without `--volumes`.
+
+Deleting the named volume deletes the local database state. For example, `docker compose down --volumes` removes `postgres_data` along with the containers and network, so the next startup creates an empty database and reruns migrations.
+
+Production deployments should back up Postgres or the underlying volume regularly before upgrades, host maintenance, or destructive Compose commands. Treat backups as sensitive because they may contain Telegram connection metadata, message text, suggestions, decisions, and memories.
 
 ## Development
 

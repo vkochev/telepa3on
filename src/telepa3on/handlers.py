@@ -31,7 +31,14 @@ def approval_keyboard(message_id: int) -> dict[str, Any]:
 
 
 def approval_text(message_text: str, suggestions: list[str]) -> str:
-    lines = ["New Telegram Business message needs approval:", "", message_text, ""]
+    lines = [
+        "New Telegram message needs owner approval:",
+        "",
+        message_text,
+        "",
+        "Draft suggestions for you only. Tap Send 1/2/3 to send one reply to the original chat, or Reject to send nothing.",
+        "",
+    ]
     lines.extend(f"{index}. {text}" for index, text in enumerate(suggestions, start=1))
     return "\n".join(lines)
 
@@ -75,10 +82,10 @@ class UpdateHandlers:
         if not text:
             return
         owner_chat_id = await self._owner_chat_id_for_message(message)
-        business_message_id = await self.repo.create_business_message(message, raw_update, owner_chat_id=owner_chat_id)
         business_connection_id = message["business_connection_id"]
         chat_id = int(message["chat"]["id"])
         recent_dialog = await self.repo.get_recent_dialog(business_connection_id, chat_id)
+        business_message_id = await self.repo.create_business_message(message, raw_update, owner_chat_id=owner_chat_id)
         memories = await self.repo.get_memories(business_connection_id, chat_id)
         generated = await self.suggestions.generate_reply_suggestions(text, recent_dialog, memories)
         await self.repo.save_suggestions(business_message_id, generated)
