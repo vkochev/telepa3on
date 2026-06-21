@@ -18,12 +18,15 @@ class TelegramBotApi:
         text: str,
         business_connection_id: str | None = None,
         reply_markup: dict[str, Any] | None = None,
+        reply_parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if business_connection_id:
             payload["business_connection_id"] = business_connection_id
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        if reply_parameters:
+            payload["reply_parameters"] = reply_parameters
         return await self._post("sendMessage", payload)
 
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict[str, Any]:

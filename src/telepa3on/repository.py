@@ -78,7 +78,7 @@ class Repository:
     async def get_suggestion_for_approval(self, business_message_id: int, index: int) -> asyncpg.Record | None:
         return await self.pool.fetchrow(
             """
-            SELECT rs.text, bm.business_connection_id, bm.chat_id, bm.status, bm.owner_chat_id
+            SELECT rs.text, bm.business_connection_id, bm.chat_id, bm.telegram_message_id, bm.status, bm.owner_chat_id
             FROM reply_suggestions rs
             JOIN business_messages bm ON bm.id = rs.business_message_id
             WHERE rs.business_message_id = $1 AND rs.suggestion_index = $2

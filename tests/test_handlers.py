@@ -39,7 +39,14 @@ class FakeRepo:
         self.memories.append((business_connection_id, business_message_id, event_type, content))
 
     async def get_suggestion_for_approval(self, business_message_id, index):
-        return {"text": f"reply {index}", "business_connection_id": "bc_1", "chat_id": 100, "status": self.status, "owner_chat_id": self.owner_chat_id}
+        return {
+            "text": f"reply {index}",
+            "business_connection_id": "bc_1",
+            "chat_id": 100,
+            "telegram_message_id": 7,
+            "status": self.status,
+            "owner_chat_id": self.owner_chat_id,
+        }
 
     async def get_message_context(self, business_message_id):
         return {"business_connection_id": "bc_1", "status": self.status, "owner_chat_id": self.owner_chat_id}
@@ -118,7 +125,12 @@ async def test_send_callback_replies_with_business_connection_id():
 
     await handlers.handle_callback_query(callback("send:42:2"))
 
-    assert telegram.messages[0] == {"chat_id": 100, "text": "reply 2", "business_connection_id": "bc_1"}
+    assert telegram.messages[0] == {
+        "chat_id": 100,
+        "text": "reply 2",
+        "business_connection_id": "bc_1",
+        "reply_parameters": {"message_id": 7},
+    }
     assert repo.sent == [(42, 2)]
     assert telegram.callbacks == [("cb_1", "Sent suggestion 2")]
 
