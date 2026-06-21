@@ -29,6 +29,25 @@ class TelegramBotApi:
             payload["reply_parameters"] = reply_parameters
         return await self._post("sendMessage", payload)
 
+    async def delete_webhook(self, drop_pending_updates: bool = False) -> dict[str, Any]:
+        return await self._post("deleteWebhook", {"drop_pending_updates": drop_pending_updates})
+
+    async def get_updates(
+        self,
+        *,
+        offset: int | None = None,
+        timeout: int,
+        allowed_updates: list[str],
+    ) -> list[dict[str, Any]]:
+        payload: dict[str, Any] = {"timeout": timeout, "allowed_updates": allowed_updates}
+        if offset is not None:
+            payload["offset"] = offset
+        data = await self._post("getUpdates", payload)
+        result = data.get("result", [])
+        if not isinstance(result, list):
+            raise RuntimeError(f"Telegram Bot API getUpdates returned non-list result: {data}")
+        return result
+
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"callback_query_id": callback_query_id}
         if text:
