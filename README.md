@@ -75,10 +75,12 @@ Use this checklist from a clean checkout to verify that the local stack starts, 
    A healthy local app returns an OK health response.
 5. Open Adminer at <http://localhost:8080> and connect with:
    - System: `PostgreSQL`
-   - Server: `postgres` from inside Compose, or `localhost` from the host if you are connecting through the published port
+   - Server: `postgres`
    - Username: `telepa3on`
    - Password: `telepa3on`
    - Database: `telepa3on`
+
+   Adminer runs inside the Compose network, so it should use the Postgres service name `postgres`, not `localhost`. Use `localhost:5432` only from tools running on your host machine outside Compose.
 6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The app container startup command runs `python -m telepa3on.migrate` before starting Uvicorn.
 7. Verify the debug timeline view is queryable in Adminer with:
 
