@@ -63,6 +63,17 @@ Apply migrations manually if you are not using the app container startup command
 python -m telepa3on.migrate
 ```
 
+
+## Development
+
+From a clean checkout, contributors and Codex should run the full developer test bootstrap command:
+
+```bash
+make test
+```
+
+This installs Telepa3on in editable mode with development dependencies and then runs the test suite with `pytest -q`.
+
 ## Telegram webhook setup
 
 Expose the app publicly, for example with a tunnel, then register the webhook:
