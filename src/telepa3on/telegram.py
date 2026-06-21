@@ -8,6 +8,7 @@ import httpx
 class TelegramBotApi:
     def __init__(self, bot_token: str, client: httpx.AsyncClient | None = None) -> None:
         self._client = client or httpx.AsyncClient(timeout=20)
+        self._owns_client = client is None
         self._base_url = f"https://api.telegram.org/bot{bot_token}"
 
     async def send_message(
@@ -30,6 +31,10 @@ class TelegramBotApi:
         if text:
             payload["text"] = text
         return await self._post("answerCallbackQuery", payload)
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
     async def _post(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self._client.post(f"{self._base_url}/{method}", json=payload)

@@ -19,19 +19,25 @@ async def lifespan(app: FastAPI):
     pool = await asyncpg.create_pool(settings.database_url)
     app.state.settings = settings
     app.state.pool = pool
+    telegram = TelegramBotApi(settings.telegram_bot_token)
+    suggestions = SuggestionClient(
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url,
+        model=settings.openai_model,
+    )
+    app.state.telegram = telegram
+    app.state.suggestions = suggestions
     app.state.handlers = UpdateHandlers(
         repo=Repository(pool),
-        telegram=TelegramBotApi(settings.telegram_bot_token),
-        suggestions=SuggestionClient(
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
-            model=settings.openai_model,
-        ),
+        telegram=telegram,
+        suggestions=suggestions,
         owner_chat_id=settings.owner_chat_id,
     )
     try:
         yield
     finally:
+        await app.state.telegram.aclose()
+        await app.state.suggestions.aclose()
         await pool.close()
 
 

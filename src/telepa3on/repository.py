@@ -71,13 +71,19 @@ class Repository:
     async def get_suggestion_for_approval(self, business_message_id: int, index: int) -> asyncpg.Record | None:
         return await self.pool.fetchrow(
             """
-            SELECT rs.text, bm.business_connection_id, bm.chat_id
+            SELECT rs.text, bm.business_connection_id, bm.chat_id, bm.status
             FROM reply_suggestions rs
             JOIN business_messages bm ON bm.id = rs.business_message_id
             WHERE rs.business_message_id = $1 AND rs.suggestion_index = $2
             """,
             business_message_id,
             index,
+        )
+
+    async def get_message_context(self, business_message_id: int) -> asyncpg.Record | None:
+        return await self.pool.fetchrow(
+            "SELECT business_connection_id, status FROM business_messages WHERE id = $1",
+            business_message_id,
         )
 
     async def mark_sent(self, business_message_id: int, index: int) -> None:

@@ -14,6 +14,7 @@ class FakeRepo:
         self.memories = []
         self.sent = []
         self.rejected = []
+        self.status = "pending"
 
     async def upsert_business_connection(self, connection, raw_update):
         self.connections.append((connection, raw_update))
@@ -32,13 +33,18 @@ class FakeRepo:
         self.memories.append((business_connection_id, business_message_id, event_type, content))
 
     async def get_suggestion_for_approval(self, business_message_id, index):
-        return {"text": f"reply {index}", "business_connection_id": "bc_1", "chat_id": 100}
+        return {"text": f"reply {index}", "business_connection_id": "bc_1", "chat_id": 100, "status": self.status}
+
+    async def get_message_context(self, business_message_id):
+        return {"business_connection_id": "bc_1", "status": self.status}
 
     async def mark_sent(self, business_message_id, index):
         self.sent.append((business_message_id, index))
+        self.status = "sent"
 
     async def mark_rejected(self, business_message_id):
         self.rejected.append(business_message_id)
+        self.status = "rejected"
 
 
 class FakeTelegram:
@@ -58,6 +64,21 @@ class FakeTelegram:
 class FakeSuggestions:
     async def generate(self, message_text):
         return ["one", "two", "three"]
+
+
+def callback(data: str, user_id: int = 999):
+    return {"id": "cb_1", "data": data, "from": {"id": user_id}, "message": {"chat": {"id": 999}}}
+
+
+@pytest.mark.asyncio
+async def test_business_connection_is_stored():
+    repo = FakeRepo()
+    handlers = UpdateHandlers(repo=repo, telegram=FakeTelegram(), suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    update = {"business_connection": {"id": "bc_1", "is_enabled": True}}
+    await handlers.handle_update(update)
+
+    assert repo.connections == [(update["business_connection"], update)]
 
 
 @pytest.mark.asyncio
@@ -89,7 +110,7 @@ async def test_send_callback_replies_with_business_connection_id():
     telegram = FakeTelegram()
     handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
 
-    await handlers.handle_callback_query({"id": "cb_1", "data": "send:42:2"})
+    await handlers.handle_callback_query(callback("send:42:2"))
 
     assert telegram.messages[0] == {"chat_id": 100, "text": "reply 2", "business_connection_id": "bc_1"}
     assert repo.sent == [(42, 2)]
@@ -97,16 +118,43 @@ async def test_send_callback_replies_with_business_connection_id():
 
 
 @pytest.mark.asyncio
-async def test_reject_callback_persists_rejection():
+async def test_callback_from_non_owner_is_rejected():
     repo = FakeRepo()
     telegram = FakeTelegram()
     handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
 
-    await handlers.handle_callback_query({"id": "cb_2", "data": "reject:42"})
+    await handlers.handle_callback_query(callback("send:42:1", user_id=123))
+
+    assert telegram.messages == []
+    assert repo.sent == []
+    assert telegram.callbacks == [("cb_1", "Only the configured owner can approve replies")]
+
+
+@pytest.mark.asyncio
+async def test_already_processed_callback_is_idempotent():
+    repo = FakeRepo()
+    repo.status = "sent"
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    await handlers.handle_callback_query(callback("send:42:1"))
+
+    assert telegram.messages == []
+    assert telegram.callbacks == [("cb_1", "This message was already processed")]
+
+
+@pytest.mark.asyncio
+async def test_reject_callback_persists_rejection_with_business_connection_memory():
+    repo = FakeRepo()
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    await handlers.handle_callback_query(callback("reject:42"))
 
     assert repo.rejected == [42]
+    assert repo.memories[0][0] == "bc_1"
     assert repo.memories[0][2] == "reply_rejected"
-    assert telegram.callbacks == [("cb_2", "Rejected")]
+    assert telegram.callbacks == [("cb_1", "Rejected")]
 
 
 def test_approval_text_includes_exactly_three_options():
@@ -116,5 +164,12 @@ def test_approval_text_includes_exactly_three_options():
     assert "3. c" in text
 
 
-def test_suggestion_parser_requires_json_array():
+def test_suggestion_parser_accepts_json_array_object_or_fence():
     assert SuggestionClient._parse('["a", "b", "c"]') == ["a", "b", "c"]
+    assert SuggestionClient._parse('{"suggestions": ["a", "b", "c"]}') == ["a", "b", "c"]
+    assert SuggestionClient._parse('```json\n["a", "b", "c"]\n```') == ["a", "b", "c"]
+
+
+def test_suggestion_parser_requires_exactly_three():
+    with pytest.raises(RuntimeError, match="exactly 3"):
+        SuggestionClient._parse('["a", "b"]')

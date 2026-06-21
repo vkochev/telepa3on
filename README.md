@@ -8,7 +8,7 @@ This project intentionally does **not** use Telethon, MTProto, Telegram API ID, 
 
 - `business_connection` updates: stores the Telegram business connection identifier and raw update payload.
 - `business_message` updates: stores incoming business messages, generates three suggestions, sends an owner approval card, and records a minimal memory event.
-- `callback_query` updates: handles `Send 1`, `Send 2`, `Send 3`, and `Reject` approval actions.
+- `callback_query` updates: handles owner-only `Send 1`, `Send 2`, `Send 3`, and `Reject` approval actions with idempotency checks.
 - Approved replies: calls Telegram Bot API `sendMessage` with `business_connection_id` so the reply is sent into the original business chat.
 - Rejected replies: persists rejected status and records the decision in memories.
 
