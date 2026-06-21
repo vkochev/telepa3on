@@ -139,7 +139,8 @@ class Repository:
     async def get_suggestion_for_approval(self, business_message_id: int, index: int) -> asyncpg.Record | None:
         return await self.pool.fetchrow(
             """
-            SELECT rs.text, bm.business_connection_id, bm.chat_id, bm.telegram_message_id, bm.status, bm.owner_chat_id
+            SELECT rs.text, bm.text AS incoming_text, bm.business_connection_id, bm.chat_id,
+                   bm.telegram_message_id, bm.status, bm.owner_chat_id
             FROM reply_suggestions rs
             JOIN business_messages bm ON bm.id = rs.business_message_id
             WHERE rs.business_message_id = $1 AND rs.suggestion_index = $2
@@ -148,9 +149,25 @@ class Repository:
             index,
         )
 
+    async def get_reply_suggestions(self, business_message_id: int) -> list[str]:
+        rows = await self.pool.fetch(
+            """
+            SELECT text
+            FROM reply_suggestions
+            WHERE business_message_id = $1
+            ORDER BY suggestion_index
+            """,
+            business_message_id,
+        )
+        return [row["text"] for row in rows]
+
     async def get_message_context(self, business_message_id: int) -> asyncpg.Record | None:
         return await self.pool.fetchrow(
-            "SELECT business_connection_id, status, owner_chat_id FROM business_messages WHERE id = $1",
+            """
+            SELECT business_connection_id, chat_id, text, status, owner_chat_id
+            FROM business_messages
+            WHERE id = $1
+            """,
             business_message_id,
         )
 

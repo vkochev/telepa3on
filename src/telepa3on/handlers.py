@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .learning import LearningExtractor
 from .openai_client import SuggestionClient
 from .repository import Repository
 from .telegram import TelegramBotApi
@@ -44,12 +45,14 @@ class UpdateHandlers:
         suggestions: SuggestionClient,
         owner_chat_id: int,
         owner_chat_routes: dict[str, int] | None = None,
+        learning: LearningExtractor | None = None,
     ) -> None:
         self.repo = repo
         self.telegram = telegram
         self.suggestions = suggestions
         self.owner_chat_id = owner_chat_id
         self.owner_chat_routes = owner_chat_routes or {}
+        self.learning = learning or LearningExtractor()
 
     async def handle_update(self, update: dict[str, Any]) -> None:
         if "business_connection" in update:
@@ -158,12 +161,23 @@ class UpdateHandlers:
             reply_parameters={"message_id": int(suggestion["telegram_message_id"])},
         )
         await self.repo.mark_sent(business_message_id, index)
+        all_suggestions = await self.repo.get_reply_suggestions(business_message_id)
+        memories = await self.repo.get_memories(suggestion["business_connection_id"], int(suggestion["chat_id"]))
         await self.repo.add_memory(
             suggestion["business_connection_id"],
             business_message_id,
             "approved_reply_sent",
             {"selected": index, "text": suggestion["text"], "owner_chat_id": record_get(suggestion, "owner_chat_id")},
         )
+        for memory in self.learning.extract(
+            incoming_message=record_get(suggestion, "incoming_text", ""),
+            suggestions=all_suggestions,
+            selected_suggestion=suggestion["text"],
+            existing_memories=memories,
+        ):
+            await self.repo.add_memory(
+                suggestion["business_connection_id"], business_message_id, "structured_memory", memory
+            )
         await self.telegram.answer_callback_query(callback_query_id, f"Sent suggestion {index}")
 
     async def _handle_reject_callback(self, callback_query: dict[str, Any], callback_query_id: str, data: str) -> None:
@@ -184,12 +198,23 @@ class UpdateHandlers:
             await self.telegram.answer_callback_query(callback_query_id, "This message was already processed")
             return
         await self.repo.mark_rejected(business_message_id)
+        all_suggestions = await self.repo.get_reply_suggestions(business_message_id)
+        memories = await self.repo.get_memories(context["business_connection_id"], int(context["chat_id"]))
         await self.repo.add_memory(
             context["business_connection_id"],
             business_message_id,
             "reply_rejected",
             {"reason": "owner_rejected", "owner_chat_id": record_get(context, "owner_chat_id")},
         )
+        for memory in self.learning.extract(
+            incoming_message=context["text"],
+            suggestions=all_suggestions,
+            rejected=True,
+            existing_memories=memories,
+        ):
+            await self.repo.add_memory(
+                context["business_connection_id"], business_message_id, "structured_memory", memory
+            )
         await self.telegram.answer_callback_query(callback_query_id, "Rejected")
 
     async def _owner_chat_id_for_message(self, message: dict[str, Any]) -> int:

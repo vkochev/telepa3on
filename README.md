@@ -15,6 +15,12 @@ This project intentionally uses the **official Telegram Bot API only**. It does 
 
 The app does not currently implement regular owner-control `message` commands. Configure `OWNER_CHAT_ID` locally as the fallback source of truth for who receives approval cards and who is allowed to approve or reject suggestions.
 
+## Learning extractor
+
+After the owner taps `Send 1`, `Send 2`, `Send 3`, or `Reject`, Telepa3on runs a conservative local learning extractor over the incoming message, the generated suggestions, the owner decision, and existing memories. It may write zero or more structured memories as `structured_memory` events with `scope`, `kind`, `content`, and `confidence` fields. Allowed structured memory kinds are `style`, `preference`, `boundary`, and `correction`.
+
+The extractor is intentionally cautious: it looks for lightweight reply-style signals, does not save random sensitive facts by default, does not infer deeply personal facts from one interaction, and returns no memories when the signal is weak. Raw event logs such as `approved_reply_sent` and `reply_rejected` remain separate from these structured memories.
+
 ## Requirements
 
 - Docker and Docker Compose

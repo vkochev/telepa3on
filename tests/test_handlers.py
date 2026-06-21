@@ -21,6 +21,7 @@ class FakeRepo:
         self.loaded_dialog_requests = []
         self.loaded_memory_requests = []
         self.loaded_memories = [{"event_type": "preference", "content": {"tone": "friendly"}}]
+        self.reply_suggestions = ["Thanks, I can help.", "I can help with that.", "Sure, happy to help."]
 
     async def upsert_business_connection(self, connection, raw_update):
         self.connections.append((connection, raw_update))
@@ -53,6 +54,7 @@ class FakeRepo:
     async def get_suggestion_for_approval(self, business_message_id, index):
         return {
             "text": f"reply {index}",
+            "incoming_text": "Need help",
             "business_connection_id": "bc_1",
             "chat_id": 100,
             "telegram_message_id": 7,
@@ -60,8 +62,17 @@ class FakeRepo:
             "owner_chat_id": self.owner_chat_id,
         }
 
+    async def get_reply_suggestions(self, business_message_id):
+        return self.reply_suggestions
+
     async def get_message_context(self, business_message_id):
-        return {"business_connection_id": "bc_1", "status": self.status, "owner_chat_id": self.owner_chat_id}
+        return {
+            "business_connection_id": "bc_1",
+            "chat_id": 100,
+            "text": "Need help",
+            "status": self.status,
+            "owner_chat_id": self.owner_chat_id,
+        }
 
     async def mark_sent(self, business_message_id, index):
         self.sent.append((business_message_id, index))
@@ -383,3 +394,61 @@ async def test_suggestion_client_prompt_includes_recent_dialog_and_memories():
     assert "likes short answers" in user_content
     assert "approved_reply_sent" in user_content
     assert "Sure thing" in user_content
+
+
+@pytest.mark.asyncio
+async def test_send_callback_persists_approved_structured_memory():
+    repo = FakeRepo()
+    repo.reply_suggestions = [
+        "Longer alternative with lots of extra details",
+        "Thanks, I can help.",
+        "Another detailed alternative",
+    ]
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    await handlers.handle_callback_query(callback("send:42:2"))
+
+    structured = [memory for memory in repo.memories if memory[2] == "structured_memory"]
+    assert structured == [
+        (
+            "bc_1",
+            42,
+            "structured_memory",
+            {
+                "scope": "chat",
+                "kind": "style",
+                "content": "Owner tends to approve concise replies.",
+                "confidence": 0.62,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reject_callback_persists_rejected_structured_memory():
+    repo = FakeRepo()
+    repo.reply_suggestions = [
+        "I can help with that today.",
+        "I can help with that now.",
+        "I can help with that here.",
+    ]
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    await handlers.handle_callback_query(callback("reject:42"))
+
+    structured = [memory for memory in repo.memories if memory[2] == "structured_memory"]
+    assert structured == [
+        (
+            "bc_1",
+            42,
+            "structured_memory",
+            {
+                "scope": "chat",
+                "kind": "correction",
+                "content": "Owner rejected a set of very similar suggestions; offer more varied options next time.",
+                "confidence": 0.66,
+            },
+        )
+    ]
