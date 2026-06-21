@@ -81,7 +81,7 @@ Use this checklist from a clean checkout to verify that the local stack starts, 
    - Database: `telepa3on`
 
    Adminer runs inside the Compose network, so it should use the Postgres service name `postgres`, not `localhost`. Use `localhost:5432` only from tools running on your host machine outside Compose.
-6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The app container startup command runs `python -m telepa3on.migrate` before starting Uvicorn.
+6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The Compose stack runs the one-shot `migrate` service to completion before starting the long-running app service.
 7. Verify the debug timeline view is queryable in Adminer with:
 
    ```sql
@@ -100,11 +100,11 @@ For tunnel-free local Telegram debugging, run the long-polling profile instead o
 docker compose --profile polling up --build
 ```
 
-The `poller` service runs migrations, calls Telegram `deleteWebhook` without dropping pending updates by default, then consumes `getUpdates` for `business_connection`, `business_message`, `edited_business_message`, `deleted_business_messages`, and `callback_query`. Long polling removes the need for an HTTPS tunnel during local debug, but webhook delivery and polling are mutually exclusive: after using polling, set the webhook again before returning to `/telegram/webhook` mode. Configure polling with `TELEGRAM_POLLING_TIMEOUT`, `TELEGRAM_POLLING_RETRY_DELAY_SECONDS`, and `TELEGRAM_POLLING_DROP_PENDING_UPDATES`.
+The Compose stack runs the one-shot `migrate` service to completion before starting the `poller` service. The poller calls Telegram `deleteWebhook` without dropping pending updates by default, then consumes `getUpdates` for `business_connection`, `business_message`, `edited_business_message`, `deleted_business_messages`, and `callback_query`. Long polling removes the need for an HTTPS tunnel during local debug, but webhook delivery and polling are mutually exclusive: after using polling, set the webhook again before returning to `/telegram/webhook` mode. Configure polling with `TELEGRAM_POLLING_TIMEOUT`, `TELEGRAM_POLLING_RETRY_DELAY_SECONDS`, and `TELEGRAM_POLLING_DROP_PENDING_UPDATES`.
 
 Use Adminer to inspect the local Postgres database while developing. The MVP stores Chat Automation connections, messages from selected personal chats, generated reply suggestions, and memory events in the tables created by the initial migration. For a quick local timeline, open the `debug_last_events` view; it combines the latest connection, message, suggestion, and memory events into one Adminer-friendly list.
 
-Apply migrations manually if you are not using the app container startup command:
+Apply migrations manually if you are not using the Compose `migrate` service:
 
 ```bash
 python -m telepa3on.migrate

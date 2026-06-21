@@ -1,22 +1,30 @@
 services:
-  app:
+  migrate:
     build: .
     env_file: .env
     depends_on:
       postgres:
         condition: service_healthy
+    command: python -m telepa3on.migrate
+
+  app:
+    build: .
+    env_file: .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
-    command: sh -c "python -m telepa3on.migrate && uvicorn telepa3on.app:app --host 0.0.0.0 --port 8000"
+    command: uvicorn telepa3on.app:app --host 0.0.0.0 --port 8000
 
   poller:
     profiles: ["polling"]
     build: .
     env_file: .env
     depends_on:
-      postgres:
-        condition: service_healthy
-    command: sh -c "python -m telepa3on.migrate && python -m telepa3on.poller"
+      migrate:
+        condition: service_completed_successfully
+    command: python -m telepa3on.poller
 
   postgres:
     image: postgres:16-alpine
