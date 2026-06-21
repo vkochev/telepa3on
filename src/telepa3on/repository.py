@@ -55,6 +55,67 @@ class Repository:
         )
         return int(row["id"])
 
+
+    async def get_recent_dialog(self, business_connection_id: str, chat_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        rows = await self.pool.fetch(
+            """
+            SELECT telegram_message_id, sender_id, text, created_at
+            FROM business_messages
+            WHERE business_connection_id = $1 AND chat_id = $2
+            ORDER BY created_at DESC, id DESC
+            LIMIT $3
+            """,
+            business_connection_id,
+            chat_id,
+            limit,
+        )
+        return [
+            {
+                "telegram_message_id": row["telegram_message_id"],
+                "sender_id": row["sender_id"],
+                "text": row["text"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] is not None else None,
+            }
+            for row in reversed(rows)
+        ]
+
+    async def get_memories(self, business_connection_id: str, chat_id: int | None = None, limit: int = 10) -> list[dict[str, Any]]:
+        if chat_id is None:
+            rows = await self.pool.fetch(
+                """
+                SELECT event_type, content, created_at
+                FROM memories
+                WHERE business_connection_id = $1
+                ORDER BY created_at DESC, id DESC
+                LIMIT $2
+                """,
+                business_connection_id,
+                limit,
+            )
+        else:
+            rows = await self.pool.fetch(
+                """
+                SELECT m.event_type, m.content, m.created_at
+                FROM memories m
+                LEFT JOIN business_messages bm ON bm.id = m.business_message_id
+                WHERE m.business_connection_id = $1
+                  AND (bm.chat_id = $2 OR m.business_message_id IS NULL)
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT $3
+                """,
+                business_connection_id,
+                chat_id,
+                limit,
+            )
+        return [
+            {
+                "event_type": row["event_type"],
+                "content": row["content"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] is not None else None,
+            }
+            for row in reversed(rows)
+        ]
+
     async def save_suggestions(self, business_message_id: int, suggestions: list[str]) -> None:
         for index, text in enumerate(suggestions, start=1):
             await self.pool.execute(

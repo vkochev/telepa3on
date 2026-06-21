@@ -17,6 +17,10 @@ class FakeRepo:
         self.status = "pending"
         self.owner_chat_id = 999
         self.business_connections = {}
+        self.recent_dialog = [{"sender_id": 200, "text": "Earlier question"}]
+        self.loaded_dialog_requests = []
+        self.loaded_memory_requests = []
+        self.loaded_memories = [{"event_type": "preference", "content": {"tone": "friendly"}}]
 
     async def upsert_business_connection(self, connection, raw_update):
         self.connections.append((connection, raw_update))
@@ -28,6 +32,14 @@ class FakeRepo:
         self.owner_chat_id = owner_chat_id
         self.messages.append((message, raw_update, owner_chat_id))
         return 42
+
+    async def get_recent_dialog(self, business_connection_id, chat_id, limit=10):
+        self.loaded_dialog_requests.append((business_connection_id, chat_id, limit))
+        return self.recent_dialog
+
+    async def get_memories(self, business_connection_id, chat_id=None, limit=10):
+        self.loaded_memory_requests.append((business_connection_id, chat_id, limit))
+        return self.loaded_memories
 
     async def save_suggestions(self, business_message_id, suggestions):
         self.suggestions.append((business_message_id, suggestions))
@@ -75,7 +87,11 @@ class FakeTelegram:
 
 
 class FakeSuggestions:
-    async def generate(self, message_text):
+    def __init__(self):
+        self.calls = []
+
+    async def generate_reply_suggestions(self, incoming_text, recent_dialog, memories):
+        self.calls.append((incoming_text, recent_dialog, memories))
         return ["one", "two", "three"]
 
 
@@ -98,7 +114,8 @@ async def test_business_connection_is_stored():
 async def test_business_message_generates_three_suggestions_and_owner_card():
     repo = FakeRepo()
     telegram = FakeTelegram()
-    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+    suggestions = FakeSuggestions()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=suggestions, owner_chat_id=999)
 
     await handlers.handle_update({
         "business_message": {
@@ -110,6 +127,9 @@ async def test_business_message_generates_three_suggestions_and_owner_card():
         }
     })
 
+    assert repo.loaded_dialog_requests == [("bc_1", 100, 10)]
+    assert repo.loaded_memory_requests == [("bc_1", 100, 10)]
+    assert suggestions.calls == [("Need help", repo.recent_dialog, repo.loaded_memories)]
     assert repo.suggestions == [(42, ["one", "two", "three"])]
     assert telegram.messages[0]["chat_id"] == 999
     assert telegram.messages[0]["reply_markup"] == approval_keyboard(42)
@@ -333,3 +353,33 @@ async def test_deleted_business_messages_records_minimal_memory_only():
             {"chat_id": 100, "message_ids": [9, 10], "raw_update": update},
         )
     ]
+
+@pytest.mark.asyncio
+async def test_suggestion_client_prompt_includes_recent_dialog_and_memories():
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": '["a", "b", "c"]'}}]}
+
+    class FakeHttpClient:
+        def __init__(self):
+            self.payload = None
+
+        async def post(self, url, headers, json):
+            self.payload = json
+            return FakeResponse()
+
+    http_client = FakeHttpClient()
+    client = SuggestionClient(api_key="key", base_url="https://example.test", model="model", client=http_client)
+    recent_dialog = [{"sender_id": 1, "text": "likes short answers"}]
+    memories = [{"event_type": "approved_reply_sent", "content": {"text": "Sure thing"}}]
+
+    assert await client.generate_reply_suggestions("Can you help?", recent_dialog, memories) == ["a", "b", "c"]
+
+    user_content = http_client.payload["messages"][1]["content"]
+    assert "Can you help?" in user_content
+    assert "likes short answers" in user_content
+    assert "approved_reply_sent" in user_content
+    assert "Sure thing" in user_content

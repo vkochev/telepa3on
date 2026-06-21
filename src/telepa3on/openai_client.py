@@ -14,15 +14,29 @@ class SuggestionClient:
         self._client = client or httpx.AsyncClient(timeout=30)
         self._owns_client = client is None
 
-    async def generate(self, message_text: str) -> list[str]:
+    async def generate_reply_suggestions(
+        self,
+        incoming_text: str,
+        recent_dialog: list[dict] | None = None,
+        memories: list[dict] | None = None,
+    ) -> list[str]:
+        prompt = {
+            "incoming_text": incoming_text,
+            "recent_dialog": recent_dialog or [],
+            "memories": memories or [],
+        }
         payload = {
             "model": self._model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "Generate exactly three concise, helpful Telegram business reply suggestions. Return JSON array of strings only.",
+                    "content": (
+                        "Generate exactly three concise, helpful Telegram business reply suggestions. "
+                        "Use the recent dialog and memories as private context. "
+                        "Return JSON array of strings only."
+                    ),
                 },
-                {"role": "user", "content": message_text},
+                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
             ],
             "temperature": 0.4,
         }
@@ -34,6 +48,9 @@ class SuggestionClient:
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
         return self._parse(content)
+
+    async def generate(self, message_text: str) -> list[str]:
+        return await self.generate_reply_suggestions(message_text, [], [])
 
     async def aclose(self) -> None:
         if self._owns_client:
