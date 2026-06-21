@@ -49,13 +49,44 @@ cp .env.example .env
 
 Owner routing normally uses the stored BusinessConnection `user_chat_id`; `OWNER_CHAT_ID` is only the fallback when no stored owner chat exists. `OWNER_CHAT_ROUTES` is intended for local/debug overrides.
 
-## Run locally
+## Local smoke test
 
-```bash
-docker compose up --build
-```
+Use this checklist from a clean checkout to verify that the local stack starts, migrates Postgres, and exposes the operator inspection view.
 
-Services:
+1. Copy the example environment file and edit the local copy:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Fill every required value in `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OWNER_CHAT_ID`, `DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL`. For the Docker Compose stack, keep `DATABASE_URL` pointed at the Compose service name, for example `postgresql://telepa3on:telepa3on@postgres:5432/telepa3on`.
+3. Start the app, Postgres, and Adminer:
+
+   ```bash
+   docker compose up --build
+   ```
+
+4. Check the app health endpoint from another terminal:
+
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+   A healthy local app returns an OK health response.
+5. Open Adminer at <http://localhost:8080> and connect with:
+   - System: `PostgreSQL`
+   - Server: `postgres` from inside Compose, or `localhost` from the host if you are connecting through the published port
+   - Username: `telepa3on`
+   - Password: `telepa3on`
+   - Database: `telepa3on`
+6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The app container startup command runs `python -m telepa3on.migrate` before starting Uvicorn.
+7. Verify the debug timeline view is queryable in Adminer with:
+
+   ```sql
+   select * from debug_last_events limit 20;
+   ```
+
+Services exposed by the local Compose file:
 
 - App: <http://localhost:8000>
 - Adminer: <http://localhost:8080>
@@ -69,6 +100,46 @@ Apply migrations manually if you are not using the app container startup command
 python -m telepa3on.migrate
 ```
 
+## Single-host Docker Compose deployment
+
+A single-host deployment can use the same app, Postgres, and Adminer services as local development, with a public HTTPS reverse proxy in front of the app. Telegram webhooks require a publicly reachable HTTPS URL; plain HTTP, private LAN hostnames, and untrusted certificates are not suitable for production webhook delivery.
+
+Recommended shape:
+
+- Run `docker compose up --build -d` on the host after creating a production `.env`.
+- Put a reverse proxy such as Caddy, nginx, Traefik, or a managed load balancer on public ports `80` and `443`. Terminate TLS there and forward HTTPS webhook traffic to the app container on Compose port `8000`.
+- Do not expose Postgres (`5432`) or Adminer (`8080`) publicly. If Adminer is enabled on a server, restrict it to a private network, SSH tunnel, VPN, or temporary maintenance window.
+- Keep the app's `DATABASE_URL` compose-internal. Inside Compose it should use the Postgres service DNS name, for example `postgresql://telepa3on:telepa3on@postgres:5432/telepa3on`, not `localhost`.
+- Use a long random `TELEGRAM_WEBHOOK_SECRET`. Telegram sends it in the `X-Telegram-Bot-Api-Secret-Token` header and the app validates it before processing webhook updates. Treat this secret like a password and rotate it if it is exposed.
+
+Register the webhook after DNS and HTTPS are working:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://YOUR_PUBLIC_HOST/telegram/webhook","secret_token":"'"$TELEGRAM_WEBHOOK_SECRET"'","allowed_updates":["business_connection","business_message","edited_business_message","deleted_business_messages","callback_query"]}'
+```
+
+To verify webhook delivery:
+
+1. Confirm the public health endpoint works through the reverse proxy, for example `curl https://YOUR_PUBLIC_HOST/health`.
+2. Call Telegram `getWebhookInfo` and check that the configured URL is correct and that Telegram is not reporting a recent delivery error:
+
+   ```bash
+   curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+   ```
+
+3. Connect the bot to Telegram Chat Automation, send or receive a selected-chat event, and inspect container logs plus `debug_last_events` in Postgres to confirm updates are arriving.
+
+Keep these values secret in production: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OPENAI_API_KEY`, database credentials and backups, `.env`, and any raw webhook payloads or database exports containing personal chat data.
+
+## Persistent Postgres data
+
+The Compose stack stores Postgres data in the named Docker volume `postgres_data`. This volume persists database state across app and database container restarts, including `docker compose restart` and `docker compose down` without `--volumes`.
+
+Deleting the named volume deletes the local database state. For example, `docker compose down --volumes` removes `postgres_data` along with the containers and network, so the next startup creates an empty database and reruns migrations.
+
+Production deployments should back up Postgres or the underlying volume regularly before upgrades, host maintenance, or destructive Compose commands. Treat backups as sensitive because they may contain Telegram connection metadata, message text, suggestions, decisions, and memories.
 
 ## Development
 
