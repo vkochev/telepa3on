@@ -31,8 +31,8 @@ cp .env.example .env
 | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | BotFather token used for official Telegram Bot API calls. |
 | `TELEGRAM_WEBHOOK_SECRET` | Secret token Telegram sends in `X-Telegram-Bot-Api-Secret-Token`. |
-| `OWNER_CHAT_ID` | Default Telegram chat ID that receives approval cards. |
-| `OWNER_CHAT_ROUTES` | Optional JSON object mapping `business_connection_id` values to owner chat IDs for per-connection approval routing. |
+| `OWNER_CHAT_ID` | Fallback Telegram chat ID that receives approval cards when no BusinessConnection `user_chat_id` is stored. |
+| `OWNER_CHAT_ROUTES` | Optional local/debug JSON override mapping `business_connection_id` values to owner chat IDs; normal routing uses BusinessConnection `user_chat_id`. |
 | `DATABASE_URL` | Async Postgres DSN used by the app. |
 | `OPENAI_API_KEY` | API key for an OpenAI-compatible provider. |
 | `OPENAI_BASE_URL` | Base URL, for example `https://api.openai.com/v1`. |

@@ -30,6 +30,12 @@ class Repository:
             json.dumps(raw_update),
         )
 
+    async def get_business_connection(self, business_connection_id: str) -> asyncpg.Record | None:
+        return await self.pool.fetchrow(
+            "SELECT business_connection_id, user_id, user_chat_id, is_enabled FROM business_connections WHERE business_connection_id = $1",
+            business_connection_id,
+        )
+
     async def create_business_message(self, message: dict[str, Any], raw_update: dict[str, Any], owner_chat_id: int) -> int:
         sender = message.get("from") or {}
         row = await self.pool.fetchrow(

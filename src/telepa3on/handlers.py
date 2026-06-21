@@ -7,6 +7,15 @@ from .repository import Repository
 from .telegram import TelegramBotApi
 
 
+def record_get(record: Any, key: str, default: Any = None) -> Any:
+    if hasattr(record, "get"):
+        return record.get(key, default)
+    try:
+        return record[key]
+    except (KeyError, TypeError):
+        return default
+
+
 def approval_keyboard(message_id: int) -> dict[str, Any]:
     return {
         "inline_keyboard": [
@@ -56,7 +65,7 @@ class UpdateHandlers:
         text = message.get("text") or message.get("caption") or ""
         if not text:
             return
-        owner_chat_id = self._owner_chat_id_for_message(message)
+        owner_chat_id = await self._owner_chat_id_for_message(message)
         business_message_id = await self.repo.create_business_message(message, raw_update, owner_chat_id=owner_chat_id)
         generated = await self.suggestions.generate(text)
         await self.repo.save_suggestions(business_message_id, generated)
@@ -100,7 +109,7 @@ class UpdateHandlers:
         if suggestion is None:
             await self.telegram.answer_callback_query(callback_query_id, "Suggestion not found")
             return
-        if not self._is_owner_callback(callback_query, suggestion.get("owner_chat_id")):
+        if not self._is_owner_callback(callback_query, record_get(suggestion, "owner_chat_id")):
             await self.telegram.answer_callback_query(callback_query_id, "Only the routed owner can approve this reply")
             return
         if suggestion["status"] != "pending":
@@ -117,7 +126,7 @@ class UpdateHandlers:
             suggestion["business_connection_id"],
             business_message_id,
             "approved_reply_sent",
-            {"selected": index, "text": suggestion["text"], "owner_chat_id": suggestion.get("owner_chat_id")},
+            {"selected": index, "text": suggestion["text"], "owner_chat_id": record_get(suggestion, "owner_chat_id")},
         )
         await self.telegram.answer_callback_query(callback_query_id, f"Sent suggestion {index}")
 
@@ -132,7 +141,7 @@ class UpdateHandlers:
         if context is None:
             await self.telegram.answer_callback_query(callback_query_id, "Message not found")
             return
-        if not self._is_owner_callback(callback_query, context.get("owner_chat_id")):
+        if not self._is_owner_callback(callback_query, record_get(context, "owner_chat_id")):
             await self.telegram.answer_callback_query(callback_query_id, "Only the routed owner can approve this reply")
             return
         if context["status"] != "pending":
@@ -143,14 +152,18 @@ class UpdateHandlers:
             context["business_connection_id"],
             business_message_id,
             "reply_rejected",
-            {"reason": "owner_rejected", "owner_chat_id": context.get("owner_chat_id")},
+            {"reason": "owner_rejected", "owner_chat_id": record_get(context, "owner_chat_id")},
         )
         await self.telegram.answer_callback_query(callback_query_id, "Rejected")
 
-    def _owner_chat_id_for_message(self, message: dict[str, Any]) -> int:
+    async def _owner_chat_id_for_message(self, message: dict[str, Any]) -> int:
         business_connection_id = message.get("business_connection_id")
         if business_connection_id in self.owner_chat_routes:
             return self.owner_chat_routes[business_connection_id]
+        if business_connection_id is not None:
+            connection = await self.repo.get_business_connection(business_connection_id)
+            if connection is not None and record_get(connection, "user_chat_id") is not None:
+                return int(record_get(connection, "user_chat_id"))
         return self.owner_chat_id
 
     def _is_owner_callback(self, callback_query: dict[str, Any], owner_chat_id: int | None = None) -> bool:

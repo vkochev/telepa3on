@@ -16,9 +16,13 @@ class FakeRepo:
         self.rejected = []
         self.status = "pending"
         self.owner_chat_id = 999
+        self.business_connections = {}
 
     async def upsert_business_connection(self, connection, raw_update):
         self.connections.append((connection, raw_update))
+
+    async def get_business_connection(self, business_connection_id):
+        return self.business_connections.get(business_connection_id)
 
     async def create_business_message(self, message, raw_update, owner_chat_id):
         self.owner_chat_id = owner_chat_id
@@ -160,16 +164,11 @@ async def test_reject_callback_persists_rejection_with_business_connection_memor
 
 
 @pytest.mark.asyncio
-async def test_business_message_routes_approval_to_business_connection_owner():
+async def test_business_message_routes_approval_to_stored_business_connection_user_chat_id():
     repo = FakeRepo()
+    repo.business_connections["bc_2"] = {"business_connection_id": "bc_2", "user_chat_id": 555}
     telegram = FakeTelegram()
-    handlers = UpdateHandlers(
-        repo=repo,
-        telegram=telegram,
-        suggestions=FakeSuggestions(),
-        owner_chat_id=999,
-        owner_chat_routes={"bc_2": 555},
-    )
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
 
     await handlers.handle_update({
         "business_message": {
@@ -184,6 +183,55 @@ async def test_business_message_routes_approval_to_business_connection_owner():
     assert repo.messages[0][2] == 555
     assert telegram.messages[0]["chat_id"] == 555
     assert repo.memories[0][3]["owner_chat_id"] == 555
+
+
+@pytest.mark.asyncio
+async def test_owner_chat_routes_override_stored_business_connection_user_chat_id():
+    repo = FakeRepo()
+    repo.business_connections["bc_2"] = {"business_connection_id": "bc_2", "user_chat_id": 555}
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(
+        repo=repo,
+        telegram=telegram,
+        suggestions=FakeSuggestions(),
+        owner_chat_id=999,
+        owner_chat_routes={"bc_2": 777},
+    )
+
+    await handlers.handle_update({
+        "business_message": {
+            "message_id": 8,
+            "business_connection_id": "bc_2",
+            "chat": {"id": 100},
+            "from": {"id": 200},
+            "text": "Route me",
+        }
+    })
+
+    assert repo.messages[0][2] == 777
+    assert telegram.messages[0]["chat_id"] == 777
+    assert repo.memories[0][3]["owner_chat_id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_owner_chat_id_is_used_when_no_route_or_stored_user_chat_id_exists():
+    repo = FakeRepo()
+    telegram = FakeTelegram()
+    handlers = UpdateHandlers(repo=repo, telegram=telegram, suggestions=FakeSuggestions(), owner_chat_id=999)
+
+    await handlers.handle_update({
+        "business_message": {
+            "message_id": 8,
+            "business_connection_id": "bc_missing",
+            "chat": {"id": 100},
+            "from": {"id": 200},
+            "text": "Route me",
+        }
+    })
+
+    assert repo.messages[0][2] == 999
+    assert telegram.messages[0]["chat_id"] == 999
+    assert repo.memories[0][3]["owner_chat_id"] == 999
 
 
 @pytest.mark.asyncio
