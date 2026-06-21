@@ -60,7 +60,7 @@ Use this checklist from a clean checkout to verify that the local stack starts, 
    ```
 
 2. Fill every required value in `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OWNER_CHAT_ID`, `DATABASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL`. For the Docker Compose stack, keep `DATABASE_URL` pointed at the Compose service name, for example `postgresql://telepa3on:telepa3on@postgres:5432/telepa3on`.
-3. Start the app, Postgres, and Adminer:
+3. Start the webhook app, Postgres, and Adminer:
 
    ```bash
    docker compose up --build
@@ -81,7 +81,7 @@ Use this checklist from a clean checkout to verify that the local stack starts, 
    - Database: `telepa3on`
 
    Adminer runs inside the Compose network, so it should use the Postgres service name `postgres`, not `localhost`. Use `localhost:5432` only from tools running on your host machine outside Compose.
-6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The app container startup command runs `python -m telepa3on.migrate` before starting Uvicorn.
+6. Verify migrations ran by confirming the MVP tables and the `debug_last_events` view exist. The Compose stack runs the one-shot `migrate` service to completion before starting the long-running app service.
 7. Verify the debug timeline view is queryable in Adminer with:
 
    ```sql
@@ -94,9 +94,17 @@ Services exposed by the local Compose file:
 - Adminer: <http://localhost:8080>
 - Postgres: `localhost:5432`
 
+For tunnel-free local Telegram debugging, run the long-polling profile instead of the webhook-only app:
+
+```bash
+docker compose --profile polling up --build
+```
+
+The Compose stack runs the one-shot `migrate` service to completion before starting the `poller` service. The poller calls Telegram `deleteWebhook` without dropping pending updates by default, then consumes `getUpdates` for `business_connection`, `business_message`, `edited_business_message`, `deleted_business_messages`, and `callback_query`. Long polling removes the need for an HTTPS tunnel during local debug, but webhook delivery and polling are mutually exclusive: after using polling, set the webhook again before returning to `/telegram/webhook` mode. Configure polling with `TELEGRAM_POLLING_TIMEOUT`, `TELEGRAM_POLLING_RETRY_DELAY_SECONDS`, and `TELEGRAM_POLLING_DROP_PENDING_UPDATES`.
+
 Use Adminer to inspect the local Postgres database while developing. The MVP stores Chat Automation connections, messages from selected personal chats, generated reply suggestions, and memory events in the tables created by the initial migration. For a quick local timeline, open the `debug_last_events` view; it combines the latest connection, message, suggestion, and memory events into one Adminer-friendly list.
 
-Apply migrations manually if you are not using the app container startup command:
+Apply migrations manually if you are not using the Compose `migrate` service:
 
 ```bash
 python -m telepa3on.migrate
@@ -138,7 +146,7 @@ Keep these values secret in production: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_
 
 ## Manual Telegram test
 
-Use this manual end-to-end test to verify the real product loop with Telegram Chat Automation, a public webhook, owner approval, and Postgres inspection. This is a real Telegram test: it requires a bot from BotFather, a Telegram profile that can enable Chat Automation, and either a public HTTPS host or a local app exposed through an HTTPS tunnel.
+Use this manual end-to-end test to verify the real product loop with Telegram Chat Automation, owner approval, and Postgres inspection. This is a real Telegram test: it requires a bot from BotFather and a Telegram profile that can enable Chat Automation. You can run it either with the production-style HTTPS webhook path or with the local long-polling debug profile.
 
 Before starting, remember the owner-control model:
 
@@ -151,8 +159,10 @@ Before starting, remember the owner-control model:
 Checklist:
 
 1. Create a new Telegram bot with BotFather, or use an existing bot dedicated to this test, and put its token in `TELEGRAM_BOT_TOKEN`.
-2. Run Telepa3on locally through a public HTTPS tunnel, or deploy it on a public HTTPS host. Telegram must be able to reach `https://YOUR_PUBLIC_HOST/telegram/webhook`; a plain local `localhost` URL is not enough.
-3. Register the webhook with the existing `setWebhook` command, using the same `TELEGRAM_WEBHOOK_SECRET` configured in `.env`:
+2. Choose a delivery mode:
+   - **Webhook/tunnel mode:** run Telepa3on locally through a public HTTPS tunnel, or deploy it on a public HTTPS host. Telegram must be able to reach `https://YOUR_PUBLIC_HOST/telegram/webhook`; a plain local `localhost` URL is not enough.
+   - **Local polling mode:** run `docker compose --profile polling up --build`. This uses `getUpdates`, so it does not need an HTTPS tunnel and it calls `deleteWebhook` before polling.
+3. For webhook/tunnel mode, register the webhook with the existing `setWebhook` command, using the same `TELEGRAM_WEBHOOK_SECRET` configured in `.env`:
 
    ```bash
    curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
@@ -162,7 +172,7 @@ Checklist:
 
 4. In Telegram, connect the bot to your Telegram profile through Telegram Chat Automation.
 5. In the Telegram Chat Automation UI, select one personal chat/contact for the bot to access. This selection is controlled by Telegram settings, not by Telepa3on code.
-6. Send or receive a new message in that selected personal chat so Telegram emits a Chat Automation `business_message` update to the webhook.
+6. Send or receive a new message in that selected personal chat so Telegram emits a Chat Automation `business_message` update to the active delivery mode.
 7. Expect an approval card with exactly three suggested replies in the owner control chat. The suggestions should appear only in this owner control chat at this point.
 8. Click `Send 1`, `Send 2`, or `Send 3` on the approval card.
 9. Verify that the selected reply appears in the original selected personal chat.
@@ -176,7 +186,7 @@ Checklist:
    limit 50;
    ```
 
-If the approval card does not appear, first check Telegram `getWebhookInfo`, app container logs, `business_connections` rows, and whether the selected personal chat is enabled in Telegram Chat Automation settings. If a reply does not appear in the original personal chat after `Send N`, confirm the bot is still connected to the Telegram profile and that the original chat remains selected for Chat Automation access.
+If the approval card does not appear in webhook mode, first check Telegram `getWebhookInfo`, app container logs, `business_connections` rows, and whether the selected personal chat is enabled in Telegram Chat Automation settings. In polling mode, check poller logs and remember that switching back to webhook mode requires calling `setWebhook` again. If a reply does not appear in the original personal chat after `Send N`, confirm the bot is still connected to the Telegram profile and that the original chat remains selected for Chat Automation access.
 
 ## Persistent Postgres data
 
@@ -198,7 +208,7 @@ This installs Telepa3on in editable mode with development dependencies and then 
 
 ## Telegram webhook setup
 
-Expose the app publicly, for example with a tunnel, then register the webhook:
+The production FastAPI endpoint is `POST /telegram/webhook` on the `app` service. For local webhook testing, expose the app through an HTTPS tunnel, use the tunnel host in `setWebhook`, include the secret token and allowed updates, then verify with `getWebhookInfo`:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
@@ -206,7 +216,7 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d '{"url":"https://YOUR_PUBLIC_HOST/telegram/webhook","secret_token":"'"$TELEGRAM_WEBHOOK_SECRET"'","allowed_updates":["business_connection","business_message","edited_business_message","deleted_business_messages","callback_query"]}'
 ```
 
-Telegram will POST updates to `/telegram/webhook`. The app validates the webhook secret header before processing updates.
+Telegram will POST updates to `/telegram/webhook`. If you previously ran the polling profile, run `setWebhook` again because the poller calls `deleteWebhook` before `getUpdates`. The app validates the webhook secret header before processing updates.
 
 The current MVP processes `business_connection`, `business_message`, `edited_business_message`, `deleted_business_messages`, and `callback_query`. Edited and deleted Telegram Chat Automation message updates are handled minimally by recording a memory event with the raw update payload; they do not regenerate reply suggestions or change approval routing. Do not include regular `message` in `allowed_updates` unless owner-control message commands are added.
 

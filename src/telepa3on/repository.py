@@ -42,7 +42,7 @@ class Repository:
             """
             INSERT INTO business_messages (telegram_message_id, business_connection_id, chat_id, sender_id, text, raw_update, owner_chat_id)
             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-            ON CONFLICT (business_connection_id, telegram_message_id) DO UPDATE SET raw_update = EXCLUDED.raw_update, owner_chat_id = EXCLUDED.owner_chat_id
+            ON CONFLICT (business_connection_id, chat_id, telegram_message_id) DO UPDATE SET raw_update = EXCLUDED.raw_update, owner_chat_id = EXCLUDED.owner_chat_id
             RETURNING id
             """,
             message["message_id"],
