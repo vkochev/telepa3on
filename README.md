@@ -135,6 +135,49 @@ To verify webhook delivery:
 
 Keep these values secret in production: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OPENAI_API_KEY`, database credentials and backups, `.env`, and any raw webhook payloads or database exports containing personal chat data.
 
+
+## Manual Telegram test
+
+Use this manual end-to-end test to verify the real product loop with Telegram Chat Automation, a public webhook, owner approval, and Postgres inspection. This is a real Telegram test: it requires a bot from BotFather, a Telegram profile that can enable Chat Automation, and either a public HTTPS host or a local app exposed through an HTTPS tunnel.
+
+Before starting, remember the owner-control model:
+
+- Telepa3on sends generated suggestions to the **owner control chat**, not to the original personal chat.
+- Telepa3on never sends a suggestion to the original personal chat until the owner taps `Send 1`, `Send 2`, or `Send 3` on the approval card.
+- Tapping `Reject` marks the suggestion rejected and sends nothing to the original personal chat.
+- The owner control chat is normally determined from Telegram `BusinessConnection.user_chat_id` when that value is available. `OWNER_CHAT_ID` is the fallback when no stored owner chat exists, and `OWNER_CHAT_ROUTES` can override routing for local/debug scenarios by mapping a `business_connection_id` to an owner chat ID.
+- Which personal chats the bot can see is controlled on the Telegram side in Telegram Chat Automation settings. Telepa3on only receives Bot API updates for chats selected there; the app code does not select, grant, or expand Telegram-side chat access.
+
+Checklist:
+
+1. Create a new Telegram bot with BotFather, or use an existing bot dedicated to this test, and put its token in `TELEGRAM_BOT_TOKEN`.
+2. Run Telepa3on locally through a public HTTPS tunnel, or deploy it on a public HTTPS host. Telegram must be able to reach `https://YOUR_PUBLIC_HOST/telegram/webhook`; a plain local `localhost` URL is not enough.
+3. Register the webhook with the existing `setWebhook` command, using the same `TELEGRAM_WEBHOOK_SECRET` configured in `.env`:
+
+   ```bash
+   curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+     -H 'Content-Type: application/json' \
+     -d '{"url":"https://YOUR_PUBLIC_HOST/telegram/webhook","secret_token":"'"$TELEGRAM_WEBHOOK_SECRET"'","allowed_updates":["business_connection","business_message","edited_business_message","deleted_business_messages","callback_query"]}'
+   ```
+
+4. In Telegram, connect the bot to your Telegram profile through Telegram Chat Automation.
+5. In the Telegram Chat Automation UI, select one personal chat/contact for the bot to access. This selection is controlled by Telegram settings, not by Telepa3on code.
+6. Send or receive a new message in that selected personal chat so Telegram emits a Chat Automation `business_message` update to the webhook.
+7. Expect an approval card with exactly three suggested replies in the owner control chat. The suggestions should appear only in this owner control chat at this point.
+8. Click `Send 1`, `Send 2`, or `Send 3` on the approval card.
+9. Verify that the selected reply appears in the original selected personal chat.
+10. Repeat with another incoming selected-chat message, click `Reject`, and verify that no suggestion is sent to the original personal chat.
+11. Open Adminer and inspect `debug_last_events` to confirm the received message, generated suggestions, owner decision, and memory event were recorded:
+
+   ```sql
+   select *
+   from debug_last_events
+   order by created_at desc
+   limit 50;
+   ```
+
+If the approval card does not appear, first check Telegram `getWebhookInfo`, app container logs, `business_connections` rows, and whether the selected personal chat is enabled in Telegram Chat Automation settings. If a reply does not appear in the original personal chat after `Send N`, confirm the bot is still connected to the Telegram profile and that the original chat remains selected for Chat Automation access.
+
 ## Persistent Postgres data
 
 The Compose stack stores Postgres data in the named Docker volume `postgres_data`. This volume persists database state across app and database container restarts, including `docker compose restart` and `docker compose down` without `--volumes`.
