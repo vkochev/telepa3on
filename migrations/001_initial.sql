@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS business_messages (
     sender_id BIGINT,
     text TEXT NOT NULL,
     raw_update JSONB NOT NULL,
+    owner_chat_id BIGINT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

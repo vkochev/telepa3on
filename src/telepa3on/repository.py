@@ -30,13 +30,19 @@ class Repository:
             json.dumps(raw_update),
         )
 
-    async def create_business_message(self, message: dict[str, Any], raw_update: dict[str, Any]) -> int:
+    async def get_business_connection(self, business_connection_id: str) -> asyncpg.Record | None:
+        return await self.pool.fetchrow(
+            "SELECT business_connection_id, user_id, user_chat_id, is_enabled FROM business_connections WHERE business_connection_id = $1",
+            business_connection_id,
+        )
+
+    async def create_business_message(self, message: dict[str, Any], raw_update: dict[str, Any], owner_chat_id: int) -> int:
         sender = message.get("from") or {}
         row = await self.pool.fetchrow(
             """
-            INSERT INTO business_messages (telegram_message_id, business_connection_id, chat_id, sender_id, text, raw_update)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-            ON CONFLICT (business_connection_id, telegram_message_id) DO UPDATE SET raw_update = EXCLUDED.raw_update
+            INSERT INTO business_messages (telegram_message_id, business_connection_id, chat_id, sender_id, text, raw_update, owner_chat_id)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+            ON CONFLICT (business_connection_id, telegram_message_id) DO UPDATE SET raw_update = EXCLUDED.raw_update, owner_chat_id = EXCLUDED.owner_chat_id
             RETURNING id
             """,
             message["message_id"],
@@ -45,6 +51,7 @@ class Repository:
             sender.get("id"),
             message.get("text") or message.get("caption") or "",
             json.dumps(raw_update),
+            owner_chat_id,
         )
         return int(row["id"])
 
@@ -71,7 +78,7 @@ class Repository:
     async def get_suggestion_for_approval(self, business_message_id: int, index: int) -> asyncpg.Record | None:
         return await self.pool.fetchrow(
             """
-            SELECT rs.text, bm.business_connection_id, bm.chat_id, bm.status
+            SELECT rs.text, bm.business_connection_id, bm.chat_id, bm.status, bm.owner_chat_id
             FROM reply_suggestions rs
             JOIN business_messages bm ON bm.id = rs.business_message_id
             WHERE rs.business_message_id = $1 AND rs.suggestion_index = $2
@@ -82,7 +89,7 @@ class Repository:
 
     async def get_message_context(self, business_message_id: int) -> asyncpg.Record | None:
         return await self.pool.fetchrow(
-            "SELECT business_connection_id, status FROM business_messages WHERE id = $1",
+            "SELECT business_connection_id, status, owner_chat_id FROM business_messages WHERE id = $1",
             business_message_id,
         )
 

@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
         telegram=telegram,
         suggestions=suggestions,
         owner_chat_id=settings.owner_chat_id,
+        owner_chat_routes=settings.owner_chat_routes,
     )
     try:
         yield
