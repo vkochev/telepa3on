@@ -58,6 +58,12 @@ class UpdateHandlers:
         if "business_message" in update:
             await self.handle_business_message(update["business_message"], update)
             return
+        if "edited_business_message" in update:
+            await self.handle_edited_business_message(update["edited_business_message"], update)
+            return
+        if "deleted_business_messages" in update:
+            await self.handle_deleted_business_messages(update["deleted_business_messages"], update)
+            return
         if "callback_query" in update:
             await self.handle_callback_query(update["callback_query"])
 
@@ -80,6 +86,31 @@ class UpdateHandlers:
             business_message_id,
             "incoming_business_message",
             {"text": text, "suggestions": generated, "owner_chat_id": owner_chat_id},
+        )
+
+    async def handle_edited_business_message(self, message: dict[str, Any], raw_update: dict[str, Any]) -> None:
+        await self.repo.add_memory(
+            message.get("business_connection_id"),
+            None,
+            "edited_business_message",
+            {
+                "message_id": message.get("message_id"),
+                "chat_id": (message.get("chat") or {}).get("id"),
+                "text": message.get("text") or message.get("caption") or "",
+                "raw_update": raw_update,
+            },
+        )
+
+    async def handle_deleted_business_messages(self, deleted_messages: dict[str, Any], raw_update: dict[str, Any]) -> None:
+        await self.repo.add_memory(
+            deleted_messages.get("business_connection_id"),
+            None,
+            "deleted_business_messages",
+            {
+                "chat_id": (deleted_messages.get("chat") or {}).get("id"),
+                "message_ids": deleted_messages.get("message_ids", []),
+                "raw_update": raw_update,
+            },
         )
 
     async def handle_callback_query(self, callback_query: dict[str, Any]) -> None:
