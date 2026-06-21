@@ -55,7 +55,7 @@ Services:
 - Adminer: <http://localhost:8080>
 - Postgres: `localhost:5432`
 
-Use Adminer to inspect the local Postgres database while developing. The MVP stores Chat Automation connections, messages from selected personal chats, generated reply suggestions, and memory events in the tables created by the initial migration.
+Use Adminer to inspect the local Postgres database while developing. The MVP stores Chat Automation connections, messages from selected personal chats, generated reply suggestions, and memory events in the tables created by the initial migration. For a quick local timeline, open the `debug_last_events` view; it combines the latest connection, message, suggestion, and memory events into one Adminer-friendly list.
 
 Apply migrations manually if you are not using the app container startup command:
 
