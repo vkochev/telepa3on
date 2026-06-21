@@ -120,6 +120,7 @@ class UpdateHandlers:
             chat_id=int(suggestion["chat_id"]),
             text=suggestion["text"],
             business_connection_id=suggestion["business_connection_id"],
+            reply_parameters={"message_id": int(suggestion["telegram_message_id"])},
         )
         await self.repo.mark_sent(business_message_id, index)
         await self.repo.add_memory(
